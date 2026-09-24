@@ -1,0 +1,381 @@
+{
+  "name": "UPS Canada | WF00 | Approved knowledge ingestion",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "WF00-1",
+      "name": "Manual test",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{json:{\"document_id\":\"demo-document\",\"version\":1,\"storage_path\":\"knowledge/demo.pdf\"}}];"
+      },
+      "id": "WF00-2",
+      "name": "Sample input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ups-v1-knowledge-ingestion",
+        "authentication": "headerAuth",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "WF00-3",
+      "name": "Authenticated task webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        720,
+        0
+      ],
+      "webhookId": "ups-v1-knowledge-ingestion"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Change only after implementing CONTRACTS.md and testing credentials.\n// Request payload cannot override this configuration.\nreturn $input.all().map(item => ({json:{input:item.json.body ?? item.json,config:{dry_run:true,api_base:'https://YOUR-DASHBOARD.example',contract_version:'ups-automation-v1'}}}));"
+      },
+      "id": "WF00-4",
+      "name": "Configuration",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows=$input.all();\nif(rows.length!==1) throw new Error('Exactly one task per execution required');\nconst {input:payload,config}=rows[0].json;\nif(!payload || typeof payload!=='object' || Array.isArray(payload)) throw new Error('Invalid payload');\nfor(const key of [\"document_id\",\"version\",\"storage_path\"]) if(payload[key]===undefined || payload[key]===null || payload[key]==='') throw new Error('Missing '+key);\n\nreturn [{json:{payload,config,correlation_id:payload.correlation_id ?? String($execution.id)}}];"
+      },
+      "id": "WF00-5",
+      "name": "Validate input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "dry-run",
+              "leftValue": "={{ $json.config.dry_run }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "WF00-6",
+      "name": "Dry run?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{json:{...{\"status\":\"sample_only\",\"next_action\":\"Extract, embed and review document before approved-only search can retrieve it\"},workflow:'WF00',dry_run:true,persisted:false}}];"
+      },
+      "id": "WF00-7",
+      "name": "Sample result - no external calls",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const x=$input.first().json;\nconst u=new URL(x.config.api_base);\nif(u.protocol!=='https:' || u.hostname.endsWith('.example') || u.username || u.password || u.search || u.hash) throw new Error('Configure deployed HTTPS backend first');\nreturn [{json:x}];"
+      },
+      "id": "WF00-8",
+      "name": "Require configured HTTPS backend",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Validate input').first().json.config.api_base + '/api/automation/v1/knowledge/extract' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({contract_version:'ups-automation-v1',workflow:'WF00',correlation_id:$('Validate input').first().json.correlation_id,input:$('Validate input').first().json.payload,previous:$json,execution_id:$execution.id}) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "WF00-9",
+      "name": "Claim document version and extract text",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2160,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const x=$input.first().json;\nif(!x.document_id || !Number.isInteger(x.version) || !Array.isArray(x.pages) || !x.pages.length || !x.content_hash) throw new Error('Invalid extraction');\nconst chunks=[];\nfor(const page of x.pages){if(typeof page.text!=='string' || page.page==null) throw new Error('Page provenance missing'); const s=page.text.trim(); for(let start=0; start<s.length; start+=1400){chunks.push({chunk_index:chunks.length,content:s.slice(start,start+1600),source_page:String(page.page)}); if(chunks.length>500) throw new Error('Document exceeds phase-one limit');}}\nif(!chunks.length) throw new Error('No text extracted; OCR or manual review required');\nreturn [{json:{document_id:x.document_id,version:x.version,content_hash:x.content_hash,chunks,status:'draft'}}];"
+      },
+      "id": "WF00-10",
+      "name": "Validate extraction and split passages",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Validate input').first().json.config.api_base + '/api/automation/v1/knowledge/embed' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({contract_version:'ups-automation-v1',workflow:'WF00',correlation_id:$('Validate input').first().json.correlation_id,input:$('Validate input').first().json.payload,previous:$json,execution_id:$execution.id}) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "WF00-11",
+      "name": "Embed passages with configured model",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2640,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const x=$input.first().json;\nif(!x.document_id || !x.content_hash || !Number.isInteger(x.version) || !x.embedding_model || !Number.isInteger(x.dimension) || x.dimension<1 || !Array.isArray(x.chunks) || !x.chunks.length) throw new Error('Embedding metadata missing');\nfor(const c of x.chunks) if(!c.content || !Array.isArray(c.embedding) || c.embedding.length!==x.dimension || !c.embedding.every(Number.isFinite)) throw new Error('Invalid vector');\nreturn [{json:{...x,status:'draft',requires_document_publication:true}}];"
+      },
+      "id": "WF00-12",
+      "name": "Validate homogeneous embeddings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2880,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Validate input').first().json.config.api_base + '/api/automation/v1/knowledge/persist' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({contract_version:'ups-automation-v1',workflow:'WF00',correlation_id:$('Validate input').first().json.correlation_id,input:$('Validate input').first().json.payload,previous:$json,execution_id:$execution.id}) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "WF00-13",
+      "name": "Persist versioned chunks pending publication",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3120,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## WF00: Approved knowledge ingestion\nInactive, dry-run by default. Manual test uses fixtures only.\nConfigure Header Auth on webhook and backend HTTP nodes.\nAPI stages marked in CONTRACTS.md are dependencies, not implemented endpoints.\nRead README.md before activation.",
+        "height": 280,
+        "width": 540
+      },
+      "id": "WF00-14",
+      "name": "Connection checklist",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        240,
+        -340
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Manual test": {
+      "main": [
+        [
+          {
+            "node": "Sample input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sample input": {
+      "main": [
+        [
+          {
+            "node": "Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Authenticated task webhook": {
+      "main": [
+        [
+          {
+            "node": "Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuration": {
+      "main": [
+        [
+          {
+            "node": "Validate input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate input": {
+      "main": [
+        [
+          {
+            "node": "Dry run?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dry run?": {
+      "main": [
+        [
+          {
+            "node": "Sample result - no external calls",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Require configured HTTPS backend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Require configured HTTPS backend": {
+      "main": [
+        [
+          {
+            "node": "Claim document version and extract text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim document version and extract text": {
+      "main": [
+        [
+          {
+            "node": "Validate extraction and split passages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate extraction and split passages": {
+      "main": [
+        [
+          {
+            "node": "Embed passages with configured model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embed passages with configured model": {
+      "main": [
+        [
+          {
+            "node": "Validate homogeneous embeddings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate homogeneous embeddings": {
+      "main": [
+        [
+          {
+            "node": "Persist versioned chunks pending publication",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Toronto",
+    "saveManualExecutions": false,
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "all"
+  },
+  "tags": []
+}
+

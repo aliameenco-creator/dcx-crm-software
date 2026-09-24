@@ -1,0 +1,78 @@
+{
+  "name": "DCX | Tracking | Daily report data",
+  "active": false,
+  "nodes": [
+    {
+      "id": "daily",
+      "name": "Daily at 18:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 18,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "report",
+      "name": "Read daily report",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        260,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $vars.DCX_DASHBOARD_URL + '/api/tracking?action=report&days=1&timezone=America%2FToronto' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 120000
+        }
+      }
+    },
+    {
+      "id": "note",
+      "name": "Setup",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -240
+      ],
+      "parameters": {
+        "content": "## Daily report data only\nSet DCX_DASHBOARD_URL and Header Auth credential. Choose the client's timezone in both the request and workflow settings. This evening report covers today so far; it does not send any notification. Review the output before adding an authorized notification destination.",
+        "height": 180,
+        "width": 580
+      }
+    }
+  ],
+  "connections": {
+    "Daily at 18:00": {
+      "main": [
+        [
+          {
+            "node": "Read daily report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Toronto"
+  }
+}

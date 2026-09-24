@@ -1,0 +1,22 @@
+node_modules/
+dist/
+.tools/
+.env*
+!.env.example
+.vercel/
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+tmp/
+
+# Local client source material and mailbox archives
+Complete guide and Data from client/
+*.pst
+*.ost
+
+# Generated caches and test output
+__pycache__/
+*.py[cod]
+test-results/
+playwright-report/
+Thumbs.db

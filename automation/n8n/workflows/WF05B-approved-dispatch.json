@@ -1,0 +1,348 @@
+{
+  "name": "UPS Canada | WF05B | Approved outbound dispatch",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "WF05B-1",
+      "name": "Manual test",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{json:{\"outbound_id\":\"demo-outbound\"}}];"
+      },
+      "id": "WF05B-2",
+      "name": "Sample input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ups-v1-approved-dispatch",
+        "authentication": "headerAuth",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "WF05B-3",
+      "name": "Authenticated task webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        720,
+        0
+      ],
+      "webhookId": "ups-v1-approved-dispatch"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Change only after implementing CONTRACTS.md and testing credentials.\n// Request payload cannot override this configuration.\nreturn $input.all().map(item => ({json:{input:item.json.body ?? item.json,config:{dry_run:true,api_base:'https://YOUR-DASHBOARD.example',contract_version:'ups-automation-v1'}}}));"
+      },
+      "id": "WF05B-4",
+      "name": "Configuration",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows=$input.all();\nif(rows.length!==1) throw new Error('Exactly one task per execution required');\nconst {input:payload,config}=rows[0].json;\nif(!payload || typeof payload!=='object' || Array.isArray(payload)) throw new Error('Invalid payload');\nfor(const key of [\"outbound_id\"]) if(payload[key]===undefined || payload[key]===null || payload[key]==='') throw new Error('Missing '+key);\n\nreturn [{json:{payload,config,correlation_id:payload.correlation_id ?? String($execution.id)}}];"
+      },
+      "id": "WF05B-5",
+      "name": "Validate input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "dry-run",
+              "leftValue": "={{ $json.config.dry_run }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "WF05B-6",
+      "name": "Dry run?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{json:{...{\"status\":\"sample_only\",\"sent\":false,\"next_action\":\"No Outlook request made; production sender is an external dependency\"},workflow:'WF05B',dry_run:true,persisted:false}}];"
+      },
+      "id": "WF05B-7",
+      "name": "Sample result - no external calls",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const x=$input.first().json;\nconst u=new URL(x.config.api_base);\nif(u.protocol!=='https:' || u.hostname.endsWith('.example') || u.username || u.password || u.search || u.hash) throw new Error('Configure deployed HTTPS backend first');\nreturn [{json:x}];"
+      },
+      "id": "WF05B-8",
+      "name": "Require configured HTTPS backend",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Validate input').first().json.config.api_base + '/api/automation/v1/outbound/claim' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({contract_version:'ups-automation-v1',workflow:'WF05B',correlation_id:$('Validate input').first().json.correlation_id,input:$('Validate input').first().json.payload,previous:$json,execution_id:$execution.id}) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "WF05B-9",
+      "name": "Claim and authorize outbound job",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2160,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const x=$input.first().json;\nif(x.claimed!==true || x.authorized!==true || x.approval_status!=='approved' || x.current_revision!==x.approved_revision || !x.lease_token || !x.outbound_id || !x.payload_hash) throw new Error('Outbound is not approved and claimed');\nif(x.send_mode !== 'live') throw new Error('Backend is not in live sending mode');\nif(!Number.isFinite(Date.parse(x.lease_expires_at)) || Date.parse(x.lease_expires_at)<=Date.now()) throw new Error('Outbound lease expired');\nreturn [{json:x}];"
+      },
+      "id": "WF05B-10",
+      "name": "Require current authorized lease",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Validate input').first().json.config.api_base + '/api/automation/v1/outbound/send' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({contract_version:'ups-automation-v1',workflow:'WF05B',correlation_id:$('Validate input').first().json.correlation_id,input:$('Validate input').first().json.payload,previous:$json,execution_id:$execution.id}) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "WF05B-11",
+      "name": "Canonical send and persist outcome",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2640,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const x=$input.first().json;\nif(!['provider_accepted','sent_confirmed','outcome_unknown','failed'].includes(x.status) || !x.outbound_id || !x.attempt_id) throw new Error('Invalid send result; reconcile backend attempt before retry');\nreturn [{json:x}];"
+      },
+      "id": "WF05B-12",
+      "name": "Validate recorded outcome",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2880,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## WF05B: Approved outbound dispatch\nInactive, dry-run by default. Manual test uses fixtures only.\nConfigure Header Auth on webhook and backend HTTP nodes.\nAPI stages marked in CONTRACTS.md are dependencies, not implemented endpoints.\nRead README.md before activation.",
+        "height": 280,
+        "width": 540
+      },
+      "id": "WF05B-13",
+      "name": "Connection checklist",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        240,
+        -340
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Manual test": {
+      "main": [
+        [
+          {
+            "node": "Sample input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sample input": {
+      "main": [
+        [
+          {
+            "node": "Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Authenticated task webhook": {
+      "main": [
+        [
+          {
+            "node": "Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuration": {
+      "main": [
+        [
+          {
+            "node": "Validate input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate input": {
+      "main": [
+        [
+          {
+            "node": "Dry run?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dry run?": {
+      "main": [
+        [
+          {
+            "node": "Sample result - no external calls",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Require configured HTTPS backend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Require configured HTTPS backend": {
+      "main": [
+        [
+          {
+            "node": "Claim and authorize outbound job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim and authorize outbound job": {
+      "main": [
+        [
+          {
+            "node": "Require current authorized lease",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Require current authorized lease": {
+      "main": [
+        [
+          {
+            "node": "Canonical send and persist outcome",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Canonical send and persist outcome": {
+      "main": [
+        [
+          {
+            "node": "Validate recorded outcome",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Toronto",
+    "saveManualExecutions": false,
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "all"
+  },
+  "tags": []
+}
+

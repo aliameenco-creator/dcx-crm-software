@@ -1,0 +1,112 @@
+{
+  "name": "DCX | Tracking | Mail intake",
+  "active": false,
+  "nodes": [
+    {
+      "id": "every-minute",
+      "name": "Every minute",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "sync-inbox",
+      "name": "Sync inbox",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        500,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.DCX_DASHBOARD_URL + '/api/tracking?action=sync' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"folder\":\"inbox\",\"generate_drafts\":false}",
+        "options": {
+          "timeout": 120000
+        }
+      }
+    },
+    {
+      "id": "sync-sent-mail",
+      "name": "Sync sent mail",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        250,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.DCX_DASHBOARD_URL + '/api/tracking?action=sync' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"folder\":\"sentitems\"}",
+        "options": {
+          "timeout": 120000
+        }
+      }
+    },
+    {
+      "id": "setup",
+      "name": "Setup",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -320
+      ],
+      "parameters": {
+        "content": "## Shared email intake\nSet DCX_DASHBOARD_URL in n8n Variables (HTTPS, no trailing slash). Select an HTTP Header Auth credential on each request: Authorization = Bearer <EMAIL_TRACKING_TOKEN>.\n\nInactive until you configure and activate it. Outlook uses a durable delta checkpoint per folder: each run continues one page and advances only after persistence. Initial backfill continues across runs. Increase schedule frequency or drain additional pages if backlog grows. Other provider adapters may use latest-page polling.\n\nAI intake is disabled for initial backfill. Once both folders show History loaded, set generate_drafts=true in Sync inbox. Only recent incoming conversations without open drafts qualify. Sent sync runs first.",
+        "height": 260,
+        "width": 680
+      }
+    }
+  ],
+  "connections": {
+    "Every minute": {
+      "main": [
+        [
+          {
+            "node": "Sync sent mail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sync sent mail": {
+      "main": [
+        [
+          {
+            "node": "Sync inbox",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

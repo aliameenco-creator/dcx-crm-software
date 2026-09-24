@@ -1,0 +1,424 @@
+{
+  "name": "UPS Canada | WF01 | Mail intake and triage",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "WF01-1",
+      "name": "Manual test",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{json:{\"mailbox_id\":\"demo-mailbox\",\"provider_message_id\":\"demo-message-001\",\"from\":\"customer@example.com\",\"subject\":\"UPS alarm\",\"body_text\":\"Our UPS displays an alarm. Please advise.\",\"direction\":\"incoming\",\"historical\":false}}];"
+      },
+      "id": "WF01-2",
+      "name": "Sample input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ups-v1-mail-intake",
+        "authentication": "headerAuth",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "WF01-3",
+      "name": "Authenticated task webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        720,
+        0
+      ],
+      "webhookId": "ups-v1-mail-intake"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Change only after implementing CONTRACTS.md and testing credentials.\n// Request payload cannot override this configuration.\nreturn $input.all().map(item => ({json:{input:item.json.body ?? item.json,config:{dry_run:true,api_base:'https://YOUR-DASHBOARD.example',contract_version:'ups-automation-v1'}}}));"
+      },
+      "id": "WF01-4",
+      "name": "Configuration",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows=$input.all();\nif(rows.length!==1) throw new Error('Exactly one task per execution required');\nconst {input:payload,config}=rows[0].json;\nif(!payload || typeof payload!=='object' || Array.isArray(payload)) throw new Error('Invalid payload');\nfor(const key of [\"mailbox_id\",\"provider_message_id\",\"from\",\"subject\",\"body_text\"]) if(payload[key]===undefined || payload[key]===null || payload[key]==='') throw new Error('Missing '+key);\nif(!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(payload.from)) throw new Error('Invalid sender');\npayload.from=payload.from.trim().toLowerCase();\nif(!['incoming','outgoing'].includes(payload.direction) || typeof payload.historical!=='boolean') throw new Error('Explicit direction and historical flag required');\nreturn [{json:{payload,config,correlation_id:payload.correlation_id ?? String($execution.id)}}];"
+      },
+      "id": "WF01-5",
+      "name": "Validate input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "dry-run",
+              "leftValue": "={{ $json.config.dry_run }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "WF01-6",
+      "name": "Dry run?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{json:{...{\"category\":\"technical_problem\",\"route\":\"WF02\",\"status\":\"sample_only\",\"next_action\":\"Collect equipment details and prepare a sourced draft\"},workflow:'WF01',dry_run:true,persisted:false}}];"
+      },
+      "id": "WF01-7",
+      "name": "Sample result - no external calls",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const x=$input.first().json;\nconst u=new URL(x.config.api_base);\nif(u.protocol!=='https:' || u.hostname.endsWith('.example') || u.username || u.password || u.search || u.hash) throw new Error('Configure deployed HTTPS backend first');\nreturn [{json:x}];"
+      },
+      "id": "WF01-8",
+      "name": "Require configured HTTPS backend",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Validate input').first().json.config.api_base + '/api/automation/v1/mail/ingest' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({contract_version:'ups-automation-v1',workflow:'WF01',correlation_id:$('Validate input').first().json.correlation_id,input:$('Validate input').first().json.payload,previous:$json,execution_id:$execution.id}) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "WF01-9",
+      "name": "Persist and deduplicate",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2160,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const x=$input.first().json; if(x.accepted!==true) return []; if(!x.message_id) throw new Error('Ingest response missing message_id'); return [{json:x}];"
+      },
+      "id": "WF01-10",
+      "name": "Stop duplicate ingestion",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Validate input').first().json.config.api_base + '/api/crm' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "action",
+              "value": "lookup"
+            },
+            {
+              "name": "email",
+              "value": "={{ $('Validate input').first().json.payload.from }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "WF01-11",
+      "name": "Load exact customer context",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2640,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Validate input').first().json.config.api_base + '/api/automation/v1/ai/triage' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({contract_version:'ups-automation-v1',workflow:'WF01',correlation_id:$('Validate input').first().json.correlation_id,input:$('Validate input').first().json.payload,previous:$json,execution_id:$execution.id}) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "WF01-12",
+      "name": "Classify message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2880,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const x = $input.first().json;\nconst categories = [\"existing_customer_support\",\"technical_problem\",\"new_product_inquiry\",\"sales_lead\",\"pricing_request\",\"quotation_request\",\"maintenance_request\",\"site_visit_request\",\"tender_rfq_rfp\",\"supplier_communication\",\"invoice_payment\",\"spam_unrelated\",\"requires_human_attention\"];\nif (!categories.includes(x.category) || !['low','normal','high','critical'].includes(x.urgency) || typeof x.summary !== 'string') throw new Error('Invalid classifier result');\nconst source = $('Validate input').first().json.payload;\nconst manual = ['tender_rfq_rfp','supplier_communication','invoice_payment','spam_unrelated','requires_human_attention'].includes(x.category);\nconst route = source.historical || source.direction !== 'incoming' || source.automatic_response ? 'record_only' : manual ? 'manual_review' : ['pricing_request','quotation_request','maintenance_request','site_visit_request'].includes(x.category) ? 'WF03' : 'WF02';\nreturn [{json:{...x,route,mailbox_id:source.mailbox_id,provider_message_id:source.provider_message_id,requires_owner_attention:x.urgency === 'critical' || route === 'manual_review'}}];"
+      },
+      "id": "WF01-13",
+      "name": "Validate triage",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3120,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Validate input').first().json.config.api_base + '/api/automation/v1/mail/route' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({contract_version:'ups-automation-v1',workflow:'WF01',correlation_id:$('Validate input').first().json.correlation_id,input:$('Validate input').first().json.payload,previous:$json,execution_id:$execution.id}) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "WF01-14",
+      "name": "Save classification and queue route",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3360,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## WF01: Mail intake and triage\nInactive, dry-run by default. Manual test uses fixtures only.\nConfigure Header Auth on webhook and backend HTTP nodes.\nAPI stages marked in CONTRACTS.md are dependencies, not implemented endpoints.\nRead README.md before activation.",
+        "height": 280,
+        "width": 540
+      },
+      "id": "WF01-15",
+      "name": "Connection checklist",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        240,
+        -340
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Manual test": {
+      "main": [
+        [
+          {
+            "node": "Sample input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sample input": {
+      "main": [
+        [
+          {
+            "node": "Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Authenticated task webhook": {
+      "main": [
+        [
+          {
+            "node": "Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuration": {
+      "main": [
+        [
+          {
+            "node": "Validate input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate input": {
+      "main": [
+        [
+          {
+            "node": "Dry run?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dry run?": {
+      "main": [
+        [
+          {
+            "node": "Sample result - no external calls",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Require configured HTTPS backend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Require configured HTTPS backend": {
+      "main": [
+        [
+          {
+            "node": "Persist and deduplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Persist and deduplicate": {
+      "main": [
+        [
+          {
+            "node": "Stop duplicate ingestion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stop duplicate ingestion": {
+      "main": [
+        [
+          {
+            "node": "Load exact customer context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load exact customer context": {
+      "main": [
+        [
+          {
+            "node": "Classify message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify message": {
+      "main": [
+        [
+          {
+            "node": "Validate triage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate triage": {
+      "main": [
+        [
+          {
+            "node": "Save classification and queue route",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Toronto",
+    "saveManualExecutions": false,
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "all"
+  },
+  "tags": []
+}
+

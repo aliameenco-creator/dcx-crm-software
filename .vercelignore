@@ -1,0 +1,7 @@
+Complete guide and Data from client/
+.tools/
+tmp/
+docs/
+client_requirements_crosscheck.html
+supabase_schema.sql
+.env*
