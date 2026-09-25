@@ -13,6 +13,7 @@ import {
   X,
   Zap,
   Inbox,
+  CalendarDays,
 } from "lucide-react";
 import { CustomerHub } from "./components/operations/CustomerHub";
 import { toClient, crmRequest } from "./lib/crm-client";
@@ -23,6 +24,7 @@ import {
 } from "./components/operations/WorkspacePages";
 import { InboxPage } from "./components/operations/Inbox";
 import { ConnectedInbox } from "./components/operations/MicrosoftInbox";
+import { CalendarAgent } from "./components/operations/CalendarAgent";
 import {
   MailProvider,
   useMailConnection,
@@ -47,6 +49,7 @@ const nav = [
   { id: "inbox", label: "Inbox", icon: Inbox },
   { id: "customers", label: "Customers", icon: Users },
   { id: "calculator", label: "Cost calculator", icon: Calculator },
+  { id: "calendar-agent", label: "Calendar Agent", icon: CalendarDays },
   ...(SHOW_RATES ? [{ id: "pricing", label: "Rates", icon: Wallet }] : []),
 ];
 export function App() {
@@ -546,6 +549,7 @@ function Dashboard({
               />
               </>
             )}
+            {tab === "calendar-agent" && <CalendarAgent preview={preview} />}
             {SHOW_RATES && tab === "pricing" && (
               <PriceBooks
                 key={ratesState}
